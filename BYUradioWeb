@@ -1,0 +1,156 @@
+#Automated Web Editor for BYUradio.org
+#Author: Scot Nielson
+#
+#This program takes slugs as user input and finds the corresponding setup sheet in a folder
+#then it retrieves headlines, guest info and the intro and outputs it for x number of slugs to a txt document
+#this makes it extremely quick to put info into the web
+#
+#functionality to add:
+#retrieve from BOX -- (program can only function when box drive is downloaded...I could hypothetically make
+#make .txt upload straight to the web
+# ^gotta open byuradio.com/admin and navigate to the episode of that day, open it, input everything into the text, save and close
+# ^ this is a little too much for me at the moment
+#
+#the txt document should ALWAYS be reviewed for accuracy
+
+#specific to extracting information from word documents
+import os
+import zipfile
+#other tools useful in extracting the information from our document
+import re
+#gets actual date to make new txt document
+from datetime import datetime
+from titlecase import titlecase
+
+#make this send an alert rather than break if more than one filename is found?
+
+def GetFileName(slug): #this takes a slug and returns the name of the cooresponding file, capitalization doesn't matter
+    setups = os.listdir('../scot/Box/BYU Radio/Top of Mind/2020 Setup Sheets/')
+    setupsLower = [x.lower() for x in setups] #makes all titles in listdir lowercase for cap-free searching
+    fileName = str([s for s in setupsLower if slug.lower() in s])
+    setupSheet = setups[setupsLower.index(fileName[2:len(fileName) - 2])] #returns properly capitalized filename based on index
+    return(setupSheet)
+	
+def CleanWord(fileSlug):
+    fileName = GetFileName(fileSlug)
+    doc = zipfile.ZipFile('../scot/Box/BYU Radio/Top of Mind/2020 Setup Sheets/' + fileName)
+    content = doc.read('word/document.xml').decode('utf-8') #.decode() turns type bytes into string for easy manipulation
+    cleaned = re.sub('<(.|\n)*?>','',content)
+    return(cleaned)
+	
+def GetHeadline(cleaned):
+    #get headline
+    headline = cleaned[cleaned.find("HEADLINE: ") + len("HEADLINE: "):cleaned.find("SEGMENT")]
+    return(headline)
+
+def GetGuest(cleaned):
+    #get name and title of guest--should be reviewed for proper formatting
+    nameAndTitle = "Name and Title of Guest(s): "
+    if cleaned.find("Pronunciation:") != -1: #if "Pronunciation has been deleted, the string will stop at "Pre-Record:"
+        guest = cleaned[cleaned.find(nameAndTitle) + len(nameAndTitle):cleaned.find("Pronunciation:")]
+    elif cleaned.find("Pre-Record") != -1:
+        guest = cleaned[cleaned.find(nameAndTitle) + len(nameAndTitle):cleaned.find("Pre-Record:")]
+    else:
+        guest = cleaned[cleaned.find(nameAndTitle) + len(nameAndTitle):cleaned.find("FOR AIR:")]
+    return(guest)
+    
+def GetIntroCopy(cleaned, fileSlug): #EDIT THIS SO IT DOESN'T HAVE TO TAKE fileSlug 
+    #gets intro, goes until it sees "QUESTIONS:" or "OUTRO COPY", whichever comes first
+    introCopy = "INTRO COPY (LIVE-READ, WRITTEN-TO-SOUND"
+    #guestName = guest[0:guest.find(" ")] #gives first name of guest to be used as stop point for intro
+    indexIntroCopyLeft = cleaned.find(introCopy) + len(introCopy) + 3
+    if cleaned.find("QUESTIONS:") < cleaned.find("OUTRO COPY") and cleaned.find("QUESTIONS:") != -1:
+        intro = cleaned[indexIntroCopyLeft:indexIntroCopyLeft + cleaned[indexIntroCopyLeft:len(cleaned)].find("QUESTIONS:")]#guestName)]
+    elif cleaned.find("Welcome.") < cleaned.find("OUTRO COPY") and cleaned.find("Welcome.") != -1:
+        intro = cleaned[indexIntroCopyLeft:indexIntroCopyLeft + cleaned[indexIntroCopyLeft:len(cleaned)].find("Welcome.")]#guestName)]
+    else:
+        intro = cleaned[indexIntroCopyLeft:indexIntroCopyLeft + cleaned[indexIntroCopyLeft:len(cleaned)].find("OUTRO COPY")]
+    
+    #if it's for Prime Cuts, this gives the original air date
+    #may need some debugging for different scenarios
+    if GetFileName(fileSlug).find("PRIME CUTS") != -1:
+        forAir = cleaned[cleaned.find("FOR AIR") + len("FOR AIR: "):len(cleaned)]
+        origAired = "(Originally aired" + forAir[0:forAir.find("PRIME")] + ")"
+    else:
+        origAired = ""
+    
+    return(intro + origAired)
+	
+def ScrapeWord(fileSlug): #this goes into a word document and returns headline (in titlecase), guest info, and intro copy
+    cleaned = CleanWord(fileSlug)
+    
+    headline = GetHeadline(cleaned)
+    guest = GetGuest(cleaned)
+    intro = GetIntroCopy(cleaned, fileSlug)
+    
+    #concatenate info, titlecase headline and guest
+    info = titlecase(headline) + "\n" + "Guest: " + titlecase(guest) + "\n" + intro + "\n\n"
+    return(info)
+	
+#THIS IS ALL BETA
+
+def GiveEpisodeInfo(fileName): #this goes into a word document and returns headline (in titlecase), guest info, and intro copy
+    cleaned = CleanWord(fileName)
+
+    #get name and title of guest--should be reviewed for proper formatting
+    nameAndTitle = "Name and Title of Guest(s): "
+    if cleaned.find("Pronunciation:") != -1: #if "Pronunciation has been deleted, the string will stop at "Pre-Record:"
+        guest = cleaned[cleaned.find(nameAndTitle) + len(nameAndTitle):cleaned.find("Pronunciation:")]
+    else:
+        guest = cleaned[cleaned.find(nameAndTitle) + len(nameAndTitle):cleaned.find("Pre-Record:")]
+
+    info = guest[0:guest.find(",")] + " of " + guest[guest.find(","):len(guest)] + " on " + fileName.lower() + "."
+    return(info)
+	
+def InsertTxt(webText): #this opens/creates a new .txt file, writes webText to it, closes .txt file
+    now = datetime.now()
+    today = now.strftime("%m-%d-%Y")
+    file = "../scot/Desktop/Setups/WebsiteAuto/" + today + ".txt"
+    f = open(file, "w+")
+    f.write(webText)
+    f.close()
+	
+#to see cleaned Word string for a filename
+print(CleanWord(input("Enter test slug: ")))
+
+#to see file name and web info for a slug:
+testSlug = input("Enter test slug: ")
+print(GetFileName(testSlug))
+print(ScrapeWord(testSlug))
+
+#Enter all slugs
+slugs = []
+
+maxNumSlugs = int(input("How many episodes are there today?:")) #let this run over a loop if input isn't an int #actually, just make it so you can type "done" or something to end
+while len(slugs) < maxNumSlugs:
+    slugInput = input("Enter slug:")
+    while GetFileName(slugInput) == "":
+        print("-", slugInput, "-", "is not a valid slug")
+        slugInput = input("Enter new slug:")
+    slugs.append(slugInput)
+    
+for x in slugs:
+    print(GetFileName(x))
+	
+	#Get web info from Box and create .txt file
+text = ""
+
+for x in slugs:
+    text += ScrapeWord(x)
+
+InsertTxt(text)
+
+#Alright I want it to write me a draft "episode info" section that I can edit down and copy-paste to the web
+
+#get word info
+#give me guest stuff, "on", slug
+
+#TODO get it to erase numbers automatically? get it to delete the directory...oof yeah there's a lot to fix here
+episodeInfo = ""
+
+for i in slugs:
+    #episodeInfo = episodeInfo + GiveEpisodeInfo(GetFileName(i))
+    episodeInfo += GiveEpisodeInfo(GetFileName(i))
+    #FIGURE OUT HOW TO USE GetEpisodeInfo() WITHOUT HAVING TO PASS GetFileName()
+
+print(episodeInfo)
